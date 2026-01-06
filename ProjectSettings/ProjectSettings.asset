@@ -146,9 +146,9 @@ PlayerSettings:
   bundleVersion: 0.1.0
   preloadedAssets:
   - {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  - {fileID: 11400000, guid: 7d316081ecae73f4880b510249836fdd, type: 2}
-  - {fileID: 831211864545979079, guid: 9b67981fc5c36e24494b793bae0f1c41, type: 2}
   - {fileID: -5781351868822017813, guid: 855a87158ae072145a5d7606800557e1, type: 2}
+  - {fileID: 831211864545979079, guid: 9b67981fc5c36e24494b793bae0f1c41, type: 2}
+  - {fileID: 11400000, guid: 7d316081ecae73f4880b510249836fdd, type: 2}
   - {fileID: 4800000, guid: c9f956787b1d945e7b36e0516201fc76, type: 3}
   - {fileID: 4800000, guid: 0945859e5a1034c2cb6dce53cb4fb899, type: 3}
   metroInputSource: 0
@@ -838,7 +838,7 @@ PlayerSettings:
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
   scriptingDefineSymbols:
-    Android: USE_INPUT_SYSTEM_POSE_CONTROL;USE_STICK_CONTROL_THUMBSTICKS
+    Android: USE_INPUT_SYSTEM_POSE_CONTROL;USE_STICK_CONTROL_THUMBSTICKS;APP_UI_EDITOR_ONLY
     Standalone: USE_INPUT_SYSTEM_POSE_CONTROL;USE_STICK_CONTROL_THUMBSTICKS
     Windows Store Apps: USE_INPUT_SYSTEM_POSE_CONTROL;USE_STICK_CONTROL_THUMBSTICKS
   additionalCompilerArguments: {}
@@ -917,7 +917,13 @@ PlayerSettings:
   XboxOneOverrideIdentityName: 
   XboxOneOverrideIdentityPublisher: 
   vrEditorSettings: {}
-  cloudServicesEnabled: {}
+  cloudServicesEnabled:
+    Build: 0
+    Game Performance: 0
+    Legacy Analytics: 0
+    Purchasing: 0
+    UDP: 0
+    Unity Ads: 0
   luminIcon:
     m_Name: 
     m_ModelFolderPath: 
@@ -939,11 +945,11 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 1
   windowsGamepadBackendHint: 0
-  cloudProjectId: d6078f28-1977-40ea-90c5-1dad888c3ed5
+  cloudProjectId: 40bcfcac-d82f-459d-acba-2988bad8e4f5
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: Spiritueurs
-  organizationId: para3ox
+  projectName: Spiritueurs (2)
+  organizationId: neilime
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}
