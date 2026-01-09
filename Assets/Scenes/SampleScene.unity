@@ -547,8 +547,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4966719baa26e4b0e8231a24d9bd491a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.XR.ARFoundation::UnityEngine.XR.ARFoundation.ARCameraManager
-  m_FocusMode: 1
-  m_LightEstimationMode: 0
+  m_FocusMode: -1
+  m_LightEstimationMode: -1
   m_AutoFocus: 1
   m_ImageStabilization: 0
   m_LightEstimation: 0
@@ -1277,8 +1277,8 @@ MonoBehaviour:
   <trackablesChanged>k__BackingField:
     m_PersistentCalls:
       m_Calls: []
-  m_PlanePrefab: {fileID: 0}
-  m_DetectionMode: -1
+  m_PlanePrefab: {fileID: 1234567890123456789, guid: b2c3d4e5f6789012345678abcdef0123, type: 3}
+  m_DetectionMode: 5
 --- !u!114 &566952692
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2386,12 +2386,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c20c773b8f416fd489d1b4e1869b1412, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SpawnPlacementManager
-  arRaycastManager: {fileID: 0}
-  arPlaneManager: {fileID: 0}
-  arCameraBackground: {fileID: 0}
-  entryPrefab: {fileID: 1234567890123456789, guid: b2c3d4e5f6789012345678abcdef0123, type: 3}
+  raycastManager: {fileID: 566952690}
+  planeManager: {fileID: 566952691}
   isPlacementMode: 1
   selectedEntryType: -1
+  minPlaneSize: 0.5
+  entriesToSpawn: 3
+  autoSpawnDelay: 1
+  placementsRoot: {fileID: 0}
 --- !u!114 &1418667350
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2404,7 +2406,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5d17bb46ecbe01e409a5b06537c539a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SpawnZoneDrawer
-  raycastManager: {fileID: 0}
+  raycastManager: {fileID: 566952690}
+  planeManager: {fileID: 566952691}
   spawnZonePrefab: {fileID: 2286894145031794925, guid: 35432c973b3e84844a687dad8b67fca6, type: 3}
   minPointDistance: 0.2
 --- !u!1 &1546513616

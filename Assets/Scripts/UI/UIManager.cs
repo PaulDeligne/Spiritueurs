@@ -153,7 +153,7 @@ public class UIManager : MonoBehaviour
         // Ensure we have a reference to SpawnPlacementManager
         if (spawnPlacementManager == null)
         {
-            spawnPlacementManager = FindObjectOfType<SpawnPlacementManager>();
+            spawnPlacementManager = FindFirstObjectByType<SpawnPlacementManager>();
         }
 
         // Start AR mode for calibration

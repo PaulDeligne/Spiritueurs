@@ -3,405 +3,253 @@ using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
-using Unity.XR.CoreUtils;
 using System.Collections.Generic;
 
-/// <summary>
-/// Simple AR placement manager for placing entry points (doors, windows, hatches) in AR.
-/// </summary>
 public class SpawnPlacementManager : MonoBehaviour
 {
-    [Header("AR Components")]
-    [SerializeField] private ARRaycastManager arRaycastManager;
-    [SerializeField] private ARPlaneManager arPlaneManager;
-    [SerializeField] private ARCameraBackground arCameraBackground;
+    [Header("AR")]
+    [SerializeField] private ARRaycastManager raycastManager;
+    [SerializeField] private ARPlaneManager planeManager;
 
-    [Header("Entry Prefab")]
-    [Tooltip("Drag your entry prefab here. If empty, a simple cube will be created.")]
-    [SerializeField] private GameObject entryPrefab;
-
-    [Header("State")]
+    [Header("Placement")]
     public bool isPlacementMode = true;
-    public int selectedEntryType = -1; // 0=Door, 1=Window, 2=Hatch
+    public int selectedEntryType = -1;
     
-    // Calibration state
+    [Header("Spawn Settings")]
+    [SerializeField] private float minPlaneSize = 0.5f; // Reduced from 1.5f
+    [SerializeField] private float entriesToSpawn = 3f; // Auto-spawn 3 entries after calibration
+    [SerializeField] private float autoSpawnDelay = 1f;
+    [SerializeField] private Transform placementsRoot; // Root to keep placed entries alive after validation
+
+    private static readonly List<ARRaycastHit> hits = new();
+    private readonly List<GameObject> placedEntries = new();
     private bool isCalibrating = false;
-
-    // Reference to UI manager for callbacks
     private UIManager uiManager;
-    
-    // List of all placed entries
-    private List<GameObject> placedEntries = new List<GameObject>();
-    
-    // AR raycast hits buffer
-    private static List<ARRaycastHit> arHits = new List<ARRaycastHit>();
-    
-    // Reference to AR Session for tracking state
-    private ARSession arSession;
-    private XROrigin xrOrigin; // NEW: Use XROrigin instead of deprecated ARSessionOrigin
+    private float timeSinceCalibrationEnd = 0f;
+    private bool autoSpawnCompleted = false;
 
-    void Start()
+    private void Awake()
     {
-        // Try to find AR components if not assigned
-        if (arRaycastManager == null)
-            arRaycastManager = FindObjectOfType<ARRaycastManager>();
-        if (arPlaneManager == null)
-            arPlaneManager = FindObjectOfType<ARPlaneManager>();
-        if (arCameraBackground == null && Camera.main != null)
-            arCameraBackground = Camera.main.GetComponent<ARCameraBackground>();
-        
-        // Find AR Session and XR Origin
-        arSession = FindObjectOfType<ARSession>();
-        xrOrigin = FindObjectOfType<XROrigin>();
-        
-        Debug.Log($"[SpawnPlacementManager] Start - arRaycastManager: {arRaycastManager != null}, arPlaneManager: {arPlaneManager != null}, arSession: {arSession != null}, xrOrigin: {xrOrigin != null}");
-        
-        // Verify XR Origin setup
-        if (xrOrigin != null)
-        {
-            Debug.Log($"[SpawnPlacementManager] XROrigin found: {xrOrigin.gameObject.name}");
-            Debug.Log($"[SpawnPlacementManager] XROrigin Camera: {xrOrigin.Camera?.name ?? "NULL"}");
-        }
-        else
-        {
-            Debug.LogError("[SpawnPlacementManager] XROrigin not found! Make sure you have an XR Origin in your scene. AR tracking will not work correctly.");
-        }
+        if (placementsRoot == null)
+            placementsRoot = transform; // Default to this transform (e.g., ARSessionOrigin)
     }
 
     void Update()
     {
-        // During calibration, don't process placement input
-        if (isCalibrating) return;
+        if (isCalibrating) return; // Don't process placement during calibration
         
-        if (!isPlacementMode) return;
-        if (selectedEntryType < 0) return; // No entry type selected
-
-        Vector2 screenPos = Vector2.zero;
-        bool inputDetected = false;
-
-        // New Input System: Touch
-        if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
+        // Auto-spawn entries after calibration
+        if (!autoSpawnCompleted && isPlacementMode)
         {
-            var touch = Touchscreen.current.primaryTouch;
-            if (touch.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Began)
+            timeSinceCalibrationEnd += Time.deltaTime;
+            if (timeSinceCalibrationEnd >= autoSpawnDelay)
             {
-                screenPos = touch.position.ReadValue();
-                inputDetected = true;
-                Debug.Log($"[SpawnPlacementManager] Touch detected at: {screenPos}");
+                AutoSpawnEntries();
+                autoSpawnCompleted = true;
             }
         }
-        // New Input System: Mouse fallback for editor
-        else if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
-        {
-            screenPos = Mouse.current.position.ReadValue();
-            inputDetected = true;
-            Debug.Log($"[SpawnPlacementManager] Mouse click at: {screenPos}");
-        }
+        
+        if (!isPlacementMode || selectedEntryType < 0) return;
+        if (Touchscreen.current == null) return;
 
-        if (!inputDetected) return;
-
-        // Don't place if touching UI
-        if (IsPointerOverUI())
-        {
-            Debug.Log("[SpawnPlacementManager] Pointer is over UI, ignoring");
+        var touch = Touchscreen.current.primaryTouch;
+        if (!touch.press.isPressed ||
+            touch.phase.ReadValue() != UnityEngine.InputSystem.TouchPhase.Began)
             return;
-        }
 
-        TryPlaceEntry(screenPos);
+        if (EventSystem.current != null &&
+            EventSystem.current.IsPointerOverGameObject())
+            return;
+
+        Vector2 pos = touch.position.ReadValue();
+        TryPlace(pos);
     }
-
-    private bool IsPointerOverUI()
+    
+    private void AutoSpawnEntries()
     {
-        if (EventSystem.current == null) return false;
-        return EventSystem.current.IsPointerOverGameObject();
-    }
-
-    private void TryPlaceEntry(Vector2 screenPosition)
-    {
-        Debug.Log($"TryPlaceEntry at screen position: {screenPosition}");
-
-        bool placed = false;
-
-        // Try multiple AR raycast methods (from most to least precise)
-        if (arRaycastManager != null)
+        int spawned = 0;
+        int maxAttempts = 20;
+        int attempts = 0;
+        
+        Debug.Log("SpawnPlacementManager: Starting auto-spawn of entries");
+        
+        while (spawned < entriesToSpawn && attempts < maxAttempts)
         {
-            // 1. First try: exact polygon hit
-            if (arRaycastManager.Raycast(screenPosition, arHits, TrackableType.PlaneWithinPolygon))
-            {
-                Pose hitPose = arHits[0].pose;
-                Debug.Log($"AR Raycast (PlaneWithinPolygon) hit at: {hitPose.position}");
-                PlaceEntryAtPosition(hitPose.position, hitPose.rotation);
-                placed = true;
-            }
-            // 2. Second try: any plane (including estimated bounds)
-            else if (arRaycastManager.Raycast(screenPosition, arHits, TrackableType.PlaneEstimated))
-            {
-                Pose hitPose = arHits[0].pose;
-                Debug.Log($"AR Raycast (PlaneEstimated) hit at: {hitPose.position}");
-                PlaceEntryAtPosition(hitPose.position, hitPose.rotation);
-                placed = true;
-            }
-            // 3. Third try: any plane at all
-            else if (arRaycastManager.Raycast(screenPosition, arHits, TrackableType.Planes))
-            {
-                Pose hitPose = arHits[0].pose;
-                Debug.Log($"AR Raycast (Planes) hit at: {hitPose.position}");
-                PlaceEntryAtPosition(hitPose.position, hitPose.rotation);
-                placed = true;
-            }
-            // 4. Fourth try: feature points (works without plane detection)
-            else if (arRaycastManager.Raycast(screenPosition, arHits, TrackableType.FeaturePoint))
-            {
-                Pose hitPose = arHits[0].pose;
-                Debug.Log($"AR Raycast (FeaturePoint) hit at: {hitPose.position}");
-                PlaceEntryAtPosition(hitPose.position, Quaternion.identity);
-                placed = true;
-            }
-            // 5. Last resort: use depth/all trackables
-            else if (arRaycastManager.Raycast(screenPosition, arHits, TrackableType.All))
-            {
-                Pose hitPose = arHits[0].pose;
-                Debug.Log($"AR Raycast (All) hit at: {hitPose.position}");
-                PlaceEntryAtPosition(hitPose.position, hitPose.rotation);
-                placed = true;
-            }
-        }
-
-        if (!placed)
-        {
-            // Fallback: place in front of camera
-            Debug.Log("All AR Raycasts failed, using camera fallback");
+            attempts++;
             
-            Camera cam = Camera.main ?? FindObjectOfType<Camera>();
-            if (cam != null)
-            {
-                // Place 1.5 meters in front of camera, on an imaginary floor plane
-                Vector3 forward = cam.transform.forward;
-                forward.y = 0; // project to horizontal
-                if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
-                forward.Normalize();
-                
-                Vector3 position = cam.transform.position + forward * 1.5f;
-                position.y = cam.transform.position.y - 1f; // Roughly floor level
-                
-                Quaternion rotation = Quaternion.LookRotation(forward);
-                Debug.Log($"Fallback placement at: {position}");
-                PlaceEntryAtPosition(position, rotation);
-            }
-            else
-            {
-                Debug.LogError("No camera found! Cannot place entry.");
-            }
+            // Try to raycast at a random screen position
+            Vector2 screenPos = new Vector2(
+                Random.Range(100f, Screen.width - 100f),
+                Random.Range(100f, Screen.height - 100f)
+            );
+            
+            if (!raycastManager.Raycast(screenPos, hits, TrackableType.PlaneWithinPolygon))
+                continue;
+
+            ARRaycastHit hit = hits[0];
+            ARPlane plane = planeManager.GetPlane(hit.trackableId);
+
+            if (!IsPlaneUsable(plane)) continue;
+
+            Vector3 position = GetSafePositionOnPlane(plane);
+            if (!IsPositionPlayable(position)) continue;
+
+            PlaceEntry(position);
+            spawned++;
+            Debug.Log($"SpawnPlacementManager: Auto-spawned entry {spawned}/{entriesToSpawn}");
+        }
+        
+        if (spawned < entriesToSpawn)
+        {
+            Debug.LogWarning($"SpawnPlacementManager: Only spawned {spawned}/{entriesToSpawn} entries after {attempts} attempts");
+        }
+        else
+        {
+            Debug.Log($"SpawnPlacementManager: Successfully auto-spawned {spawned} entries");
         }
     }
 
-    private void PlaceEntryAtPosition(Vector3 worldPosition, Quaternion rotation)
+    void TryPlace(Vector2 screenPos)
     {
-        Debug.Log($"PlaceEntryAtPosition called - worldPosition: {worldPosition}, rotation: {rotation.eulerAngles}");
-        
-        // Check AR tracking state
-        var trackingState = ARSession.state;
-        Debug.Log($"AR Session state: {trackingState}");
-        
-        Camera cam = Camera.main ?? FindObjectOfType<Camera>();
-        if (cam != null)
-        {
-            Debug.Log($"Camera world position: {cam.transform.position}");
-            Debug.Log($"Camera local position: {cam.transform.localPosition}");
-            
-            float distanceFromCamera = Vector3.Distance(worldPosition, cam.transform.position);
-            Debug.Log($"Distance from camera: {distanceFromCamera}m");
-            
-            // If position is too close to camera, something is wrong
-            if (distanceFromCamera < 0.3f)
-            {
-                Debug.LogWarning("Position too close to camera! Adjusting...");
-                worldPosition = cam.transform.position + cam.transform.forward * 1.5f;
-                worldPosition.y -= 0.5f;
-            }
-        }
-        
-        GameObject entry;
+        if (!raycastManager.Raycast(screenPos, hits, TrackableType.PlaneWithinPolygon))
+            return;
 
-        // Create a simple cube
-        entry = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        
-        // CRITICAL: Set position in WORLD space, not local
-        entry.transform.SetParent(null); // Ensure no parent first!
-        entry.transform.position = worldPosition;
-        entry.transform.rotation = rotation;
+        ARRaycastHit hit = hits[0];
+        ARPlane plane = planeManager.GetPlane(hit.trackableId);
+
+        if (!IsPlaneUsable(plane)) return;
+
+        Vector3 position = GetSafePositionOnPlane(plane);
+        if (!IsPositionPlayable(position)) return;
+
+        PlaceEntry(position);
+    }
+
+    bool IsPlaneUsable(ARPlane plane)
+    {
+        if (plane == null) return false;
+        if (plane.alignment != PlaneAlignment.HorizontalUp) return false;
+        if (plane.trackingState != TrackingState.Tracking) return false;
+        if (plane.size.x < minPlaneSize || plane.size.y < minPlaneSize) return false;
+        return true;
+    }
+
+    Vector3 GetSafePositionOnPlane(ARPlane plane)
+    {
+        Vector2 size = plane.size;
+        float margin = 0.3f;
+
+        float x = Random.Range(-size.x / 2 + margin, size.x / 2 - margin);
+        float z = Random.Range(-size.y / 2 + margin, size.y / 2 - margin);
+
+        return plane.transform.TransformPoint(new Vector3(x, 0, z));
+    }
+
+    bool IsPositionPlayable(Vector3 pos)
+    {
+        Camera cam = Camera.main;
+        if (!cam) return false;
+
+        float dist = Vector3.Distance(cam.transform.position, pos);
+        if (dist < 1.5f || dist > 4f) return false;
+
+        Vector3 dir = (pos - cam.transform.position).normalized;
+        if (Vector3.Dot(cam.transform.forward, dir) < 0.5f) return false;
+
+        return true;
+    }
+
+    void PlaceEntry(Vector3 pos)
+    {
+        var placedType = selectedEntryType;
+        GameObject entry = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        entry.transform.position = pos;
+        entry.transform.rotation = Quaternion.identity;
         entry.transform.localScale = new Vector3(0.3f, 0.5f, 0.05f);
-        
-        // Double-check it's in world space
-        Debug.Log($"Entry parent: {(entry.transform.parent != null ? entry.transform.parent.name : "NONE (world)")}");
-        Debug.Log($"Entry final world position: {entry.transform.position}");
-        
-        // Remove collider
-        var collider = entry.GetComponent<Collider>();
-        if (collider != null) Destroy(collider);
-        
-        // Set a bright color to be visible
-        var renderer = entry.GetComponent<MeshRenderer>();
-        if (renderer != null)
-        {
-            renderer.material = new Material(renderer.material);
-            renderer.material.color = Color.green;
-        }
+        entry.transform.SetParent(placementsRoot, true);
+        Destroy(entry.GetComponent<Collider>());
 
-        // Name it based on type
-        string[] typeNames = { "Door", "Window", "Hatch" };
-        string typeName = (selectedEntryType >= 0 && selectedEntryType < typeNames.Length) 
-            ? typeNames[selectedEntryType] 
-            : "Entry";
-        entry.name = $"{typeName}_{placedEntries.Count}";
+        entry.GetComponent<MeshRenderer>().material.color = Color.green;
+        entry.name = $"Entry_{placedEntries.Count}";
 
-        // Add to list
         placedEntries.Add(entry);
+        selectedEntryType = -1;
 
-        // Notify UI
         if (uiManager != null)
         {
-            uiManager.OnPlaced(selectedEntryType);
+            uiManager.OnPlaced(placedType);
         }
-
-        // Deselect after placing (user must select again for next placement)
-        selectedEntryType = -1;
-        
-        Debug.Log($"Entry placed successfully: {entry.name} at world pos {entry.transform.position}");
     }
 
-    /// <summary>
-    /// Called by UIManager when user selects an entry type to place
-    /// </summary>
-    public void SelectTypeToPlace(int typeIndex, UIManager ui)
-    {
-        selectedEntryType = typeIndex;
-        uiManager = ui;
-        isPlacementMode = true;
-        
-        // Enable AR plane detection
-        if (arPlaneManager != null) arPlaneManager.enabled = true;
-        if (arCameraBackground != null) arCameraBackground.enabled = true;
-        
-        Debug.Log($"Selected entry type: {typeIndex}");
-    }
-
-    /// <summary>
-    /// Called when entering AR mode from start menu
-    /// </summary>
-    public void EnterARMode()
-    {
-        isPlacementMode = true;
-        if (arPlaneManager != null) arPlaneManager.enabled = true;
-        if (arCameraBackground != null) arCameraBackground.enabled = true;
-    }
-
-    /// <summary>
-    /// Called to disable AR mode (back to menu)
-    /// </summary>
-    public void DisableARMode()
-    {
-        isPlacementMode = false;
-        isCalibrating = false;
-        if (arPlaneManager != null) arPlaneManager.enabled = false;
-        if (arCameraBackground != null) arCameraBackground.enabled = false;
-    }
-
-    /// <summary>
-    /// Called when player starts the game (after placing all entries)
-    /// </summary>
     public void StartGame()
     {
         isPlacementMode = false;
-        if (arPlaneManager != null) arPlaneManager.enabled = false;
-        
-        Debug.Log($"Game started with {placedEntries.Count} entries placed");
+        planeManager.enabled = false;
     }
     
-    #region Calibration
+    // Methods required by UIManager
+    public void DisableARMode()
+    {
+        if (raycastManager != null) raycastManager.enabled = false;
+        if (planeManager != null) planeManager.enabled = false;
+    }
     
-    /// <summary>
-    /// Start the calibration phase - AR detects surfaces before placement begins
-    /// </summary>
+    public void EnterARMode()
+    {
+        if (raycastManager != null) raycastManager.enabled = true;
+        if (planeManager != null) planeManager.enabled = true;
+    }
+    
     public void StartCalibration()
     {
         isCalibrating = true;
         isPlacementMode = false;
-        selectedEntryType = -1;
-        
-        // Enable AR plane detection
-        if (arPlaneManager != null) 
-        {
-            arPlaneManager.enabled = true;
-            Debug.Log($"[SpawnPlacementManager] ARPlaneManager enabled, detection mode: {arPlaneManager.requestedDetectionMode}");
-        }
-        else
-        {
-            Debug.LogError("[SpawnPlacementManager] ARPlaneManager is NULL! AR detection will not work.");
-        }
-        
-        if (arCameraBackground != null) arCameraBackground.enabled = true;
-        
-        Debug.Log("[SpawnPlacementManager] Calibration started - scanning for surfaces");
     }
     
-    /// <summary>
-    /// End calibration and allow placement
-    /// </summary>
     public void EndCalibration()
     {
         isCalibrating = false;
         isPlacementMode = true;
-        
-        Debug.Log($"[SpawnPlacementManager] Calibration ended - {GetDetectedPlaneCount()} planes detected");
+        timeSinceCalibrationEnd = 0f;
+        autoSpawnCompleted = false;
     }
     
-    /// <summary>
-    /// Get the number of AR planes currently detected
-    /// </summary>
+    public string GetARStatus()
+    {
+        string status = "AR Status:\n";
+        status += $"Raycast Manager: {(raycastManager != null && raycastManager.enabled ? "Enabled" : "Disabled")}\n";
+        status += $"Plane Manager: {(planeManager != null && planeManager.enabled ? "Enabled" : "Disabled")}\n";
+        status += $"Planes detected: {GetDetectedPlaneCount()}\n";
+        return status;
+    }
+    
     public int GetDetectedPlaneCount()
     {
-        if (arPlaneManager == null) 
-        {
-            Debug.LogWarning("[SpawnPlacementManager] GetDetectedPlaneCount: arPlaneManager is null");
-            return 0;
-        }
-        
+        if (planeManager == null) return 0;
         int count = 0;
-        foreach (var plane in arPlaneManager.trackables)
+        foreach (var plane in planeManager.trackables)
         {
-            if (plane.gameObject.activeSelf)
+            if (plane.trackingState == TrackingState.Tracking)
                 count++;
         }
         return count;
     }
     
-    /// <summary>
-    /// Get detailed AR status for debugging
-    /// </summary>
-    public string GetARStatus()
+    public int GetPlacedEntriesCount()
     {
-        string status = "";
-        status += $"ARRaycastManager: {(arRaycastManager != null ? "OK" : "NULL")}\n";
-        status += $"ARPlaneManager: {(arPlaneManager != null ? "OK" : "NULL")}\n";
-        if (arPlaneManager != null)
-        {
-            status += $"PlaneManager enabled: {arPlaneManager.enabled}\n";
-            status += $"Detection mode: {arPlaneManager.requestedDetectionMode}\n";
-            status += $"Planes detected: {GetDetectedPlaneCount()}\n";
-        }
-        status += $"ARCameraBackground: {(arCameraBackground != null ? "OK" : "NULL")}\n";
-        return status;
+        return placedEntries.Count;
     }
     
-    #endregion
-
-    // Keep old method names for compatibility
-    public void SelectSlot(int index) => selectedEntryType = index;
-    public void SelectDoorToPlace(int index, UIManager ui) => SelectTypeToPlace(index, ui);
+    public void SelectSlot(int slotIndex)
+    {
+        // This method can be implemented if you need slot functionality
+        Debug.Log($"Selected slot: {slotIndex}");
+    }
     
-    /// <summary>
-    /// Get the number of entries placed so far
-    /// </summary>
-    public int GetPlacedEntriesCount() => placedEntries.Count;
+    public void SelectTypeToPlace(int typeIndex, UIManager ui)
+    {
+        selectedEntryType = typeIndex;
+        uiManager = ui;
+        Debug.Log($"Selected type to place: {typeIndex}");
+    }
 }

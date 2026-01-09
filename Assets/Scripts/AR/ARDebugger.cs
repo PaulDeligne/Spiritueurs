@@ -21,8 +21,8 @@ public class ARDebugger : MonoBehaviour
     
     void Start()
     {
-        arSession = FindObjectOfType<ARSession>();
-        xrOrigin = FindObjectOfType<XROrigin>();
+        arSession = FindFirstObjectByType<ARSession>();
+        xrOrigin = FindFirstObjectByType<XROrigin>();
         arCamera = Camera.main;
         
         if (arCamera != null)

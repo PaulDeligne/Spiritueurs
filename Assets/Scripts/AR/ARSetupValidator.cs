@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using Unity.XR.CoreUtils;
+using UnityEngine.InputSystem.XR;
 
 /// <summary>
 /// Validates and reports AR setup issues at runtime.
@@ -27,7 +28,7 @@ public class ARSetupValidator : MonoBehaviour
         bool hasErrors = false;
         
         // 1. Check AR Session
-        arSession = FindObjectOfType<ARSession>();
+        arSession = FindFirstObjectByType<ARSession>();
         if (arSession == null)
         {
             LogError("AR Session NOT FOUND! Add an AR Session to your scene.");
@@ -39,7 +40,7 @@ public class ARSetupValidator : MonoBehaviour
         }
         
         // 2. Check XR Origin
-        xrOrigin = FindObjectOfType<XROrigin>();
+        xrOrigin = FindFirstObjectByType<XROrigin>();
         if (xrOrigin == null)
         {
             LogError("XR Origin NOT FOUND! Your scene needs an XR Origin.");
@@ -91,21 +92,17 @@ public class ARSetupValidator : MonoBehaviour
             }
             
             // Check for TrackedPoseDriver
-            var trackedPoseDriver = Camera.main.GetComponent<UnityEngine.InputSystem.XR.TrackedPoseDriver>();
-            var legacyTrackedPoseDriver = Camera.main.GetComponent<UnityEngine.XR.ARFoundation.ARPoseDriver>();
+            var trackedPoseDriver = Camera.main.GetComponent<TrackedPoseDriver>();
             
-            if (trackedPoseDriver == null && legacyTrackedPoseDriver == null)
+            if (trackedPoseDriver == null)
             {
-                LogError("Camera has NO TrackedPoseDriver or ARPoseDriver!");
+                LogError("Camera has NO TrackedPoseDriver!");
                 LogError("FIX: Add 'Tracked Pose Driver' component to your camera.");
                 hasErrors = true;
             }
             else
             {
-                if (trackedPoseDriver != null)
-                    Log($"✓ TrackedPoseDriver found on camera");
-                if (legacyTrackedPoseDriver != null)
-                    Log($"✓ ARPoseDriver found on camera");
+                Log($"✓ TrackedPoseDriver found on camera");
             }
             
             // Check ARCameraManager
@@ -132,7 +129,7 @@ public class ARSetupValidator : MonoBehaviour
         }
         
         // 4. Check ARRaycastManager
-        var raycastManager = FindObjectOfType<ARRaycastManager>();
+        var raycastManager = FindFirstObjectByType<ARRaycastManager>();
         if (raycastManager == null)
         {
             LogError("ARRaycastManager NOT FOUND! Add it to XR Origin.");
@@ -144,7 +141,7 @@ public class ARSetupValidator : MonoBehaviour
         }
         
         // 5. Check ARPlaneManager
-        var planeManager = FindObjectOfType<ARPlaneManager>();
+        var planeManager = FindFirstObjectByType<ARPlaneManager>();
         if (planeManager == null)
         {
             LogWarning("ARPlaneManager not found - plane detection won't work.");
